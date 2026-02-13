@@ -1,8 +1,7 @@
-const CACHE_NAME = "bolo-tracker-v1";
+const CACHE_NAME = "bolo-tracker-v7-1-supa-pwa-v2";
 const ASSETS = [
   "./",
   "./index.html",
-  "./app.js",
   "./supabase-config.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
@@ -20,23 +19,24 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.map(k => k !== CACHE_NAME ? caches.delete(k) : null));
+    await Promise.all(keys.map((k) => (k === CACHE_NAME ? null : caches.delete(k))));
     self.clients.claim();
   })());
 });
 
 self.addEventListener("fetch", (event) => {
   const req = event.request;
-  if (req.url.includes("/rest/v1/") || req.url.includes("/auth/v1/")) {
-    event.respondWith(fetch(req).catch(() => caches.match(req)));
-    return;
-  }
   event.respondWith((async () => {
-    const cached = await caches.match(req);
-    if (cached) return cached;
-    const fresh = await fetch(req);
     const cache = await caches.open(CACHE_NAME);
-    cache.put(req, fresh.clone());
-    return fresh;
+    const cached = await cache.match(req);
+    if (cached) return cached;
+    try {
+      const fresh = await fetch(req);
+      if (fresh && fresh.ok && req.method === "GET") cache.put(req, fresh.clone());
+      return fresh;
+    } catch (e) {
+      // fallback to app shell
+      return (await cache.match("./index.html")) || cached;
+    }
   })());
 });

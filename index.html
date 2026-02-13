@@ -6,6 +6,10 @@
     <meta name="description" content="Bolo Tracker v7.1 (Drive JSON Sync) - Control de horas trabajadas con jornadas extra y facturación">
     <meta name="theme-color" content="#208090">
     <title>Bolo Tracker v7.1 (Drive JSON Sync)</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <meta name="theme-color" content="#0a0a0f">
+  <link rel="icon" href="./icons/icon-192.png">
+
     <style>
         :root {
             --color-primary: #208090;
@@ -536,29 +540,86 @@
                 margin-bottom: var(--spacing-sm);
             }
         }
-    
-                .supabase-controls{display:inline-flex;gap:8px;align-items:center;margin-left:8px;flex-wrap:wrap}
-                .badge{display:inline-flex;align-items:center;padding:6px 10px;border:1px solid rgba(255,255,255,.18);border-radius:999px;font-size:12px;background:rgba(0,0,0,.18)}
-                .badge.muted{opacity:.75}
-                .auth-modal{max-width:520px}
-                .auth-error{background:rgba(255,0,0,.12);border:1px solid rgba(255,0,0,.25);padding:10px 12px;border-radius:10px;margin-bottom:10px}
-                .divider{height:1px;background:rgba(255,255,255,.12);margin:14px 0}
-                .hint{font-size:12px;opacity:.8;margin-top:8px}
-                .btn.google{background:linear-gradient(135deg,#db4437,#4285f4);border:0;color:#fff}
-
-            </style>
-
-    <meta name="theme-color" content="#0aa0b0">
-    <link rel="manifest" href="./manifest.webmanifest">
-    <link rel="icon" href="./icons/icon-192.png" sizes="192x192">
-    <link rel="apple-touch-icon" href="./icons/icon-192.png">
-
+    </style>
 </head>
 <body>
+
+<div id="authOverlay" style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.75);backdrop-filter:blur(6px);z-index:99999;">
+  <div style="width:min(520px,92vw);background:#0f1320;border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:18px 18px 14px;box-shadow:0 12px 40px rgba(0,0,0,.45);color:#fff;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+      <div style="font-weight:700;font-size:18px;">Acceso</div>
+      <div id="authStatusPill" style="font-size:12px;padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.10);">Supabase</div>
+    </div>
+    <div style="margin-top:8px;color:rgba(255,255,255,.75);font-size:13px;line-height:1.35;">
+      Inicia sesión para sincronizar tus bolos entre móvil y PC (RLS por usuario).
+    </div>
+    <div style="display:grid;grid-template-columns:1fr;gap:10px;margin-top:12px;">
+      <label style="font-size:12px;color:rgba(255,255,255,.7);">Email
+        <input id="authEmail" type="email" autocomplete="email" style="width:100%;margin-top:6px;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:#0b0f1a;color:#fff;outline:none;">
+      </label>
+      <label style="font-size:12px;color:rgba(255,255,255,.7);">Contraseña
+        <input id="authPass" type="password" autocomplete="current-password" style="width:100%;margin-top:6px;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:#0b0f1a;color:#fff;outline:none;">
+      </label>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:2px;">
+        <button id="btnLogin" type="button" style="padding:10px 14px;border-radius:12px;border:0;background:#e11d48;color:#fff;font-weight:700;cursor:pointer;">Entrar</button>
+        <button id="btnSignup" type="button" style="padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#fff;font-weight:600;cursor:pointer;">Crear cuenta</button>
+        <button id="btnOffline" type="button" style="margin-left:auto;padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:transparent;color:rgba(255,255,255,.8);cursor:pointer;">Entrar sin sync</button>
+      </div>
+      <div id="authMsg" style="min-height:18px;color:#ffb4b4;font-size:12px;"></div>
+    </div>
+  </div>
+</div>
+
     <div id="root"></div>
     <input id="importJsonInput" type="file" accept="application/json" style="display:none" />
 
-    <script type="module">
+    
+<script type="module">
+  import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+  import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./supabase-config.js";
+
+  const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  window.supa = {
+    client,
+    async getSession() {
+      const { data, error } = await client.auth.getSession();
+      if (error) throw error;
+      return data.session;
+    },
+    onAuth(cb) {
+      return client.auth.onAuthStateChange((_event, session) => cb(session));
+    },
+    async signInEmail(email, password) {
+      return client.auth.signInWithPassword({ email, password });
+    },
+    async signUpEmail(email, password) {
+      return client.auth.signUp({ email, password });
+    },
+    async signOut() {
+      return client.auth.signOut();
+    },
+    async loadState(userId) {
+      const { data, error } = await client
+        .from("bolo_tracker_state")
+        .select("state_json, updated_at")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (error) throw error;
+      return data?.state_json || null;
+    },
+    async saveState(userId, stateJson) {
+      const { error } = await client
+        .from("bolo_tracker_state")
+        .upsert({ user_id: userId, state_json: stateJson }, { onConflict: "user_id" });
+      if (error) throw error;
+    }
+  };
+
+  window.dispatchEvent(new Event("supa-ready"));
+</script>
+
+<script>
         // ============================================================================
         // ESTADO Y PERSISTENCIA
         // ============================================================================
@@ -858,14 +919,11 @@
                         <h1>🏗️ Bolo Tracker v7.1 (Drive JSON Sync)</h1>
                         <p>Control inteligente de horas, jornadas extra y facturación</p>
                         <div class="header-actions">
-                        <button class="btn primary" onclick="app.openBoloModal()">✨ Crear Nuevo Bolo</button>
-                        <button class="btn secondary" onclick="app.toggleStats()">📊 Estadísticas</button>
-                        <button class="btn secondary" onclick="app.exportJson()">⬇️ Exportar JSON</button>
-                        <button class="btn secondary" onclick="document.getElementById('importJsonInput').click()">⬆️ Importar JSON</button>
-
-                        <!-- Supabase (opcional) -->
-                        ${app.renderSupabaseControls()}
-                    </div>
+                            <button class="btn btn-primary" onclick="app.openBoloModal()">✨ Crear Nuevo Bolo</button>
+                            <button class="btn btn-outline" onclick="app.switchTab('estadisticas')">📊 Estadísticas</button>
+                            <button class="btn btn-outline" onclick="app.exportJSON()">⬇️ Exportar JSON</button>
+                            <button class="btn btn-outline" onclick="app.importJSON()">⬆️ Importar JSON</button>
+                        </div>
                     </div>
                     <button class="theme-toggle" onclick="app.toggleTheme()" title="Cambiar tema">
                         ${state.theme === 'light' ? '🌙 Dark' : '☀️ Light'}
@@ -1060,7 +1118,6 @@
                         <button class="btn btn-outline" onclick="app.exportBoloCSV(${boloId})">📥 Descargar CSV</button>
                     </div>
                 </div>
-                ${app.renderAuthModal()}
             `;
 
             const root = document.getElementById('root');
@@ -1284,7 +1341,6 @@
             init() {
                 storage.loadState();
                 theme.init();
-                supa.init();
 
                 const input = document.getElementById('importJsonInput');
                 if (input && !input._boloBound) {
@@ -1685,8 +1741,109 @@
             }
         };
 
-        document.addEventListener('DOMContentLoaded', () => {
-            app.init();
+        
+document.addEventListener('DOMContentLoaded', async () => {
+  // Service Worker (PWA)
+  if ("serviceWorker" in navigator) {
+    try { await navigator.serviceWorker.register("./sw.js"); } catch (e) { /* ignore */ }
+  }
+
+  // Espera a supabase (si falla, entra en modo local)
+  const waitSupa = () => new Promise((res) => {
+    if (window.supa) return res();
+    window.addEventListener("supa-ready", () => res(), { once: true });
+    setTimeout(() => res(), 2000); // fallback
+  });
+  await waitSupa();
+
+  const overlay = document.getElementById("authOverlay");
+  const msg = document.getElementById("authMsg");
+  const emailEl = document.getElementById("authEmail");
+  const passEl = document.getElementById("authPass");
+
+  async function startApp() {
+    overlay.style.display = "none";
+    app.init();
+  }
+
+  // Si no hay supabase cargado -> local
+  if (!window.supa) {
+    await startApp();
+    return;
+  }
+
+  async function hydrateFromRemote(userId) {
+    try {
+      const remote = await window.supa.loadState(userId);
+      if (remote && typeof remote === "string") {
+        localStorage.setItem("boloTrackerState", remote);
+      }
+    } catch (e) {
+      console.warn("No se pudo cargar estado remoto:", e);
+    }
+  }
+
+  // Patch: al guardar estado local, sincroniza (sin cambiar estructura)
+  const __origSaveState = storage.saveState.bind(storage);
+  storage.saveState = function patchedSaveState() {
+    __origSaveState();
+    __supaSyncDebounced();
+  };
+
+  const session = await window.supa.getSession();
+  if (session?.user?.id) {
+    __supaUserId = session.user.id;
+    await hydrateFromRemote(__supaUserId);
+    await startApp();
+    return;
+  }
+
+  // Login UI
+  overlay.style.display = "flex";
+
+  function setMsg(t, isError=true) {
+    msg.style.color = isError ? "#ffb4b4" : "#b4ffd4";
+    msg.textContent = t || "";
+  }
+
+  async function doLogin(isSignup=false) {
+    setMsg("");
+    const email = (emailEl.value || "").trim();
+    const password = passEl.value || "";
+    if (!email || !password) { setMsg("Rellena email y contraseña."); return; }
+    try {
+      const { data, error } = isSignup
+        ? await window.supa.signUpEmail(email, password)
+        : await window.supa.signInEmail(email, password);
+      if (error) throw error;
+      const userId = data?.user?.id || (await window.supa.getSession())?.user?.id;
+      if (!userId) {
+        setMsg("Revisa tu email si Supabase requiere confirmación antes de iniciar sesión.", false);
+        return;
+      }
+      __supaUserId = userId;
+      await hydrateFromRemote(__supaUserId);
+      setMsg("Acceso correcto.", false);
+      await startApp();
+    } catch (e) {
+      setMsg(e?.message || String(e));
+    }
+  }
+
+  document.getElementById("btnLogin").addEventListener("click", () => doLogin(false));
+  document.getElementById("btnSignup").addEventListener("click", () => doLogin(true));
+  document.getElementById("btnOffline").addEventListener("click", async () => {
+    __supaUserId = null;
+    setMsg("");
+    await startApp();
+  });
+
+  // Enter submits
+  passEl.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") doLogin(false);
+  });
+});
+
         });
     </script>
 </body>
