@@ -719,6 +719,41 @@
                 return { ok: true };
             }
         };
+// ------------------------
+// Supabase Sync helpers (avoid crashes + enable auto-sync)
+let __supaUserId = null;
+let __supaSyncTimer = null;
+let __supaSyncInFlight = false;
+
+// Call this after login/logout to set current user id
+function __supaSetUserId(id) {
+  __supaUserId = id || null;
+}
+
+async function __supaSyncNow() {
+  try {
+    if (!window.supa || !__supaUserId) return;
+    if (__supaSyncInFlight) return;
+    __supaSyncInFlight = true;
+    const state = storage.exportState();
+    await window.supa.saveState(__supaUserId, state);
+  } catch (e) {
+    console.warn("[supa] sync error:", e);
+  } finally {
+    __supaSyncInFlight = false;
+  }
+}
+
+function __supaSyncDebounced(delayMs = 600) {
+  try {
+    if (!window.supa || !__supaUserId) return;
+    clearTimeout(__supaSyncTimer);
+    __supaSyncTimer = setTimeout(__supaSyncNow, delayMs);
+  } catch (e) {
+    console.warn("[supa] debounce error:", e);
+  }
+}
+
 
         // ============================================================================
         // TEMA
