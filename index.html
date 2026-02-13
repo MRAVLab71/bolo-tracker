@@ -1,12 +1,13 @@
 <!DOCTYPE html>
+
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Bolo Tracker v7.1 (Drive JSON Sync) - Control de horas trabajadas con jornadas extra y facturación">
-    <meta name="theme-color" content="#208090">
-    <title>Bolo Tracker v7.1 (Drive JSON Sync)</title>
-    <style>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<meta content="Bolo Tracker v7.1 (Drive JSON Sync) - Control de horas trabajadas con jornadas extra y facturación" name="description"/>
+<meta content="#208090" name="theme-color"/>
+<title>Bolo Tracker v7.1 (Drive JSON Sync)</title>
+<style>
         :root {
             --color-primary: #208090;
             --color-primary-light: #32B8C6;
@@ -537,12 +538,259 @@
             }
         }
     </style>
+<link href="manifest.webmanifest" rel="manifest"/><link href="icons/icon-192.png" rel="icon"/><link href="icons/icon-192.png" rel="apple-touch-icon"/>
+<style id="auth-overlay-style">
+#authOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(2,6,23,.72);backdrop-filter:blur(10px);z-index:9999;padding:24px}
+#authCard{width:min(520px,100%);border:1px solid rgba(255,255,255,.14);border-radius:16px;background:rgba(15,23,42,.92);color:#e2e8f0;box-shadow:0 20px 80px rgba(0,0,0,.45);padding:20px}
+#authCard h2{margin:0 0 6px 0;font-size:18px}
+#authCard p{margin:0 0 14px 0;color:rgba(226,232,240,.75);font-size:13px;line-height:1.35}
+.authRow{display:flex;gap:10px;flex-wrap:wrap}
+.authBtn{border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.08);color:#e2e8f0;border-radius:12px;padding:10px 12px;font-weight:600;cursor:pointer}
+.authBtn.primary{background:linear-gradient(135deg, rgba(236,72,153,.9), rgba(244,63,94,.9));border:none}
+.authBtn:disabled{opacity:.55;cursor:not-allowed}
+.authInput{width:100%;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.16);background:rgba(2,6,23,.35);color:#e2e8f0;outline:none}
+.authGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:520px){.authGrid{grid-template-columns:1fr}}
+#authMsg{margin-top:10px;font-size:13px;color:rgba(226,232,240,.85)}
+#authMsg.error{color:#fca5a5}
+#authMsg.ok{color:#86efac}
+#appRoot{display:none}
+#logoutBtn{position:fixed;top:14px;right:14px;z-index:9000;display:none}
+</style>
+<script defer="" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script type="module">
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase-config.js';
+window.SUPABASE_URL = SUPABASE_URL;
+window.SUPABASE_ANON_KEY = SUPABASE_ANON_KEY;
+</script>
+
+<script data-auth="1" defer="">
+(function(){
+  function qs(sel){return document.querySelector(sel);}
+  function setMsg(text, kind){
+    var el = qs('#authMsg');
+    if(!el) return;
+    el.textContent = text || '';
+    el.className = kind ? (''+kind) : '';
+    if(kind) el.classList.add(kind);
+  }
+  function setBusy(isBusy){
+    document.querySelectorAll('#authOverlay button').forEach(function(b){ b.disabled = !!isBusy; });
+  }
+
+  function ensureDeps(){
+    if(!window.supabase || !window.SUPABASE_URL || !window.SUPABASE_ANON_KEY){
+      return false;
+    }
+    return true;
+  }
+
+  function storageKey(base){
+    return (window.__BOLO_USER_ID ? ('bolo:' + window.__BOLO_USER_ID + ':' + base) : base);
+  }
+  window.__boloKey = storageKey;
+
+  function showApp(){
+    var root = qs('#appRoot');
+    var overlay = qs('#authOverlay');
+    var logout = qs('#logoutBtn');
+    if(root) root.style.display = '';
+    if(overlay) overlay.style.display = 'none';
+    if(logout) logout.style.display = '';
+  }
+  function showLogin(){
+    var root = qs('#appRoot');
+    var overlay = qs('#authOverlay');
+    var logout = qs('#logoutBtn');
+    if(root) root.style.display = 'none';
+    if(overlay) overlay.style.display = 'flex';
+    if(logout) logout.style.display = 'none';
+  }
+
+  function bootWhenReady(){
+    var tries = 0;
+    var t = setInterval(function(){
+      tries++;
+      if(ensureDeps()){
+        clearInterval(t);
+        start();
+      }else if(tries>120){
+        clearInterval(t);
+        console.error('Supabase no está listo (SDK o claves). Revisa supabase-config.js y la carga del SDK.');
+      }
+    }, 50);
+  }
+
+  function start(){
+    var client = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    window.__supabase = client;
+
+    // logout button
+    var logout = qs('#logoutBtn');
+    if(logout){
+      logout.addEventListener('click', function(){
+        client.auth.signOut().catch(console.error);
+      });
+    }
+
+    function onAuthed(user){
+      window.__BOLO_USER = user;
+      window.__BOLO_USER_ID = user && user.id ? user.id : null;
+      // Invalidate any cached per-user state migration if needed.
+      showApp();
+      if(typeof window.__boloAppInit === 'function'){
+        window.__boloAppInit();
+      }else{
+        console.warn('No se encontró __boloAppInit (app init).');
+      }
+    }
+
+    function onUnAuthed(){
+      window.__BOLO_USER = null;
+      window.__BOLO_USER_ID = null;
+      showLogin();
+      setBusy(false);
+    }
+
+    // Wire UI
+    var btnGoogle = qs('#btnGoogle');
+    var btnEmailLogin = qs('#btnEmailLogin');
+    var btnEmailSignup = qs('#btnEmailSignup');
+
+    function getEmailPass(){
+      return { email: (qs('#email')||{}).value || '', password: (qs('#password')||{}).value || '' };
+    }
+
+    if(btnGoogle){
+      btnGoogle.addEventListener('click', async function(){
+        try{
+          setMsg('');
+          setBusy(true);
+          await client.auth.signInWithOAuth({
+            provider:'google',
+            options:{
+              redirectTo: window.location.origin
+            }
+          });
+          // Redirect happens.
+        }catch(e){
+          console.error(e);
+          setMsg(e && e.message ? e.message : 'Error con Google OAuth', 'error');
+          setBusy(false);
+        }
+      });
+    }
+
+    if(btnEmailLogin){
+      btnEmailLogin.addEventListener('click', async function(){
+        var c = getEmailPass();
+        if(!c.email || !c.password){ setMsg('Rellena email y contraseña.', 'error'); return; }
+        try{
+          setMsg('');
+          setBusy(true);
+          var res = await client.auth.signInWithPassword(c);
+          if(res && res.error) throw res.error;
+          // If SIGNED_IN event fires later, we handle it. But also:
+          var user = res && res.data && res.data.user;
+          if(user) onAuthed(user);
+        }catch(e){
+          console.error(e);
+          setMsg(e && e.message ? e.message : 'No se pudo iniciar sesión', 'error');
+          setBusy(false);
+        }
+      });
+    }
+
+    if(btnEmailSignup){
+      btnEmailSignup.addEventListener('click', async function(){
+        var c = getEmailPass();
+        if(!c.email || !c.password){ setMsg('Rellena email y contraseña.', 'error'); return; }
+        try{
+          setMsg('');
+          setBusy(true);
+          var res = await client.auth.signUp({
+            email: c.email,
+            password: c.password,
+            options: { emailRedirectTo: window.location.origin }
+          });
+          if(res && res.error) throw res.error;
+          setMsg('Cuenta creada. Si tienes confirmación por email activada, revisa tu correo.', 'ok');
+          // Might not be signed in immediately depending on settings.
+          setBusy(false);
+        }catch(e){
+          console.error(e);
+          setMsg(e && e.message ? e.message : 'No se pudo crear la cuenta', 'error');
+          setBusy(false);
+        }
+      });
+    }
+
+    // Check session
+    (async function(){
+      try{
+        const { data } = await client.auth.getSession();
+        const session = data && data.session;
+        if(session && session.user){
+          onAuthed(session.user);
+        }else{
+          onUnAuthed();
+        }
+      }catch(e){
+        console.error(e);
+        onUnAuthed();
+      }
+    })();
+
+    client.auth.onAuthStateChange(function(evt, session){
+      if(evt === 'SIGNED_IN' && session && session.user){
+        onAuthed(session.user);
+      }
+      if(evt === 'SIGNED_OUT'){
+        onUnAuthed();
+      }
+    });
+
+    // Basic SW registration (optional, safe)
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.register('./sw.js').catch(function(){});
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', bootWhenReady);
+})();
+</script>
 </head>
 <body>
-    <div id="root"></div>
-    <input id="importJsonInput" type="file" accept="application/json" style="display:none" />
+<button class="authBtn" id="logoutBtn">Salir</button>
+<div id="authOverlay">
+<div id="authCard">
+<h2>Bolo Tracker · Acceso</h2>
+<p>Inicia sesión para acceder a tus bolos y mantenerlos separados por usuario (RLS en Supabase).</p>
+<div class="authRow" style="margin-bottom:12px">
+<button class="authBtn primary" id="btnGoogle">Continuar con Google</button>
+</div>
+<div class="authGrid">
+<div>
+<label style="font-size:12px;color:rgba(226,232,240,.7)">Email</label>
+<input autocomplete="email" class="authInput" id="email" placeholder="tu@email.com" type="email"/>
+</div>
+<div>
+<label style="font-size:12px;color:rgba(226,232,240,.7)">Contraseña</label>
+<input autocomplete="current-password" class="authInput" id="password" placeholder="••••••••" type="password"/>
+</div>
+</div>
+<div class="authRow" style="margin-top:12px">
+<button class="authBtn primary" id="btnEmailLogin">Entrar</button>
+<button class="authBtn" id="btnEmailSignup">Crear cuenta</button>
+</div>
+<div id="authMsg"></div>
+</div>
+</div>
 
-    <script>
+
+
+
+<div id="appRoot"><div id="root"></div><input accept="application/json" id="importJsonInput" style="display:none" type="file"/><script>
         // ============================================================================
         // ESTADO Y PERSISTENCIA
         // ============================================================================
@@ -1667,6 +1915,5 @@
         document.addEventListener('DOMContentLoaded', () => {
             app.init();
         });
-    </script>
-</body>
+    </script></div></body>
 </html>
